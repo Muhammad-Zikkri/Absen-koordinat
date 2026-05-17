@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Zap, Power, ShieldCheck, UserCheck, Settings, ArrowRight, X, History, Lock, FileSpreadsheet, ScanFace, MapPin, Camera } from 'lucide-react';
+import { Zap, Power, ShieldCheck, UserCheck, Settings, ArrowRight, X, History, Lock, FileSpreadsheet, ScanFace, MapPin, Camera, Sparkles, Fingerprint } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import confetti from 'canvas-confetti';
 import * as XLSX from 'xlsx';
@@ -27,7 +27,7 @@ interface AttendanceRecord {
 }
 
 export default function AttendancePage() {
-    const [step, setStep] = useState('auth');
+    const [step, setStep] = useState('main'); // main, adminLogin, history, success
     const [employeeId, setEmployeeId] = useState('');
     const [attendanceType, setAttendanceType] = useState('HADIR');
     const [currentTime, setCurrentTime] = useState('');
@@ -54,7 +54,13 @@ export default function AttendancePage() {
     useEffect(() => {
         const saved = localStorage.getItem('absensi_history');
         if (saved) setHistory(JSON.parse(saved));
-    }, []);
+        
+        // Initialize sensors on mount if in main step
+        if (step === 'main') {
+            initCamera();
+            checkLocation();
+        }
+    }, [step]);
 
     const initCamera = async () => {
         try {
@@ -85,7 +91,10 @@ export default function AttendancePage() {
     };
 
     const doAbsent = async (type: string) => {
-        if (isSubmitting) return;
+        if (isSubmitting || !employeeId) {
+            if (!employeeId) alert("Employee ID is required.");
+            return;
+        }
         setIsSubmitting(true);
         try {
             const res = await fetch('/api/attendance', {
@@ -138,63 +147,55 @@ export default function AttendancePage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ password: adminPassword })
             });
-            if (res.ok) setStep('history');
-            else alert('Access Denied');
+            if (res.ok) {
+                setStep('history');
+                setAdminPassword('');
+            } else {
+                alert('Access Denied');
+            }
         } catch (err) {
             alert('Server Error');
         }
     };
 
-    const isAdminOk = attendanceType === 'HADIR' ? (isLocationOk && isCameraOk) : isCameraOk;
+    const isReadyToSubmit = employeeId && (attendanceType === 'HADIR' ? (isLocationOk && isCameraOk) : isCameraOk);
 
     return (
         <div className="app-container">
             <div className="aura-1"></div>
             <div className="aura-2"></div>
             <div className="aura-3"></div>
-            <div className="step-progress">
-                <div className={`step-dot ${step === 'auth' ? 'active' : 'completed'}`}></div>
-                <div className={`step-dot ${step === 'verify' ? 'active' : step === 'success' ? 'completed' : ''}`}></div>
-                <div className={`step-dot ${step === 'success' ? 'active' : ''}`}></div>
-            </div>
 
             <header>
-                <div className="logo"><div className="logo-icon">PA</div><h1>PT Putra Andespal</h1></div>
+                <div className="logo"><div className="logo-icon"><Sparkles size={24} color="white" /></div><h1>PT Putra Andespal</h1></div>
                 <div className="time-display">{currentTime}</div>
             </header>
 
             <div className="main-frame">
                 <main>
-                    {step === 'auth' && (
+                    {step === 'main' && (
                         <section className="card active">
-                            <div className="card-header"><UserCheck /><h2>Identitas</h2></div>
-                            <p style={{ color: '#64748b', fontSize: 13, marginTop: -15 }}>Masukkan kode akses resmi anda.</p>
+                            <div className="card-header"><Fingerprint /><h2>Absensi Portal</h2></div>
+                            
                             <div className="input-group">
                                 <label>Employee ID</label>
                                 <input value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} placeholder="PA-XXXX-XXX" />
                             </div>
-                            <div className="hyper-actions">
-                                <button onClick={() => employeeId ? (setStep('verify'), initCamera(), checkLocation()) : alert('Required')} className="btn-primary" style={{ flex: 2 }}>Authorize <ArrowRight size={18} /></button>
-                                <button onClick={() => setStep('adminLogin')} className="btn-secondary" style={{ flex: 1 }}><Settings size={18} /></button>
-                            </div>
-                        </section>
-                    )}
 
-                    {step === 'verify' && (
-                        <section className="card active">
-                            <div className="card-header"><ShieldCheck /><h2>Verification</h2></div>
                             <div className="status-grid">
                                 <div className={`status-item ${isLocationOk ? 'ok' : 'error'}`}><MapPin size={18} /><div className="status-info"><span>GPS</span><small>{isLocationOk ? 'SECURED' : 'LOCKED'}</small></div></div>
                                 <div className={`status-item ${isCameraOk ? 'ok' : 'error'}`}><Camera size={18} /><div className="status-info"><span>BIO</span><small>{isCameraOk ? 'ACTIVE' : 'OFF'}</small></div></div>
                             </div>
+                            
                             <div className="input-group">
-                                <label>Mode</label>
+                                <label>Mode Absensi</label>
                                 <select value={attendanceType} onChange={(e) => setAttendanceType(e.target.value)}>
                                     <option value="HADIR">Hadir (Kantor)</option>
                                     <option value="IZIN">Izin</option>
                                     <option value="SAKIT">Sakit</option>
                                 </select>
                             </div>
+                            
                             <div className="verification-area">
                                 <div className="camera-container">
                                     <video ref={videoRef} autoPlay playsInline id="webcam"></video>
@@ -203,15 +204,20 @@ export default function AttendancePage() {
                                 </div>
                                 <MapComponent userLocation={userLocation} officeLocation={OFFICE_COORDS} radius={ALLOWED_RADIUS} />
                             </div>
+                            
                             <div className="action-grid">
-                                <div onClick={() => isAdminOk && doAbsent('IN')} className={`action-card in ${!isAdminOk || isSubmitting ? 'disabled' : ''}`}>
+                                <div onClick={() => isReadyToSubmit && doAbsent('IN')} className={`action-card in ${!isReadyToSubmit || isSubmitting ? 'disabled' : ''}`}>
                                     <div className="action-icon"><Zap size={28} /></div>
                                     <div className="action-text"><h3>{isSubmitting ? 'VERIFYING...' : 'CLOCK IN'}</h3></div>
                                 </div>
-                                <div onClick={() => isAdminOk && attendanceType === 'HADIR' && doAbsent('OUT')} className={`action-card out ${(!isAdminOk || attendanceType !== 'HADIR' || isSubmitting) ? 'disabled' : ''}`}>
+                                <div onClick={() => isReadyToSubmit && attendanceType === 'HADIR' && doAbsent('OUT')} className={`action-card out ${(!isReadyToSubmit || attendanceType !== 'HADIR' || isSubmitting) ? 'disabled' : ''}`}>
                                     <div className="action-icon"><Power size={28} /></div>
                                     <div className="action-text"><h3>{isSubmitting ? 'VERIFYING...' : 'CLOCK OUT'}</h3></div>
                                 </div>
+                            </div>
+
+                            <div className="hyper-actions" style={{ marginTop: '5px' }}>
+                                <button onClick={() => setStep('adminLogin')} className="btn-secondary" style={{ width: '100%' }}><Settings size={18} /> Admin Access</button>
                             </div>
                         </section>
                     )}
@@ -225,14 +231,14 @@ export default function AttendancePage() {
                             </div>
                             <div className="hyper-actions">
                                 <button onClick={handleAdminLogin} className="btn-primary" style={{ flex: 1 }}>Verify</button>
-                                <button onClick={() => setStep('auth')} className="btn-secondary" style={{ flex: 1 }}>Abort</button>
+                                <button onClick={() => setStep('main')} className="btn-secondary" style={{ flex: 1 }}>Abort</button>
                             </div>
                         </section>
                     )}
 
                     {step === 'history' && (
                         <section className="card active">
-                            <div className="card-header"><History /><h2>Log Database</h2><button onClick={() => setStep('auth')} className="btn-icon"><X size={18} /></button></div>
+                            <div className="card-header"><History /><h2>Log Database</h2><button onClick={() => setStep('main')} className="btn-icon"><X size={18} /></button></div>
                             <div className="filters">
                                 <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Filter ID..." />
                                 <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
@@ -242,8 +248,13 @@ export default function AttendancePage() {
                             <div className="history-list">
                                 {history.filter(h => (statusFilter === 'ALL' || h.status === statusFilter) && h.employeeId.includes(searchQuery)).map(h => (
                                     <div key={h.id} className="history-item">
-                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontWeight: 700 }}>{h.timestamp}</span><span className={`history-tag tag-${h.status.toLowerCase()}`}>{h.status}</span></div>
-                                        <div style={{ fontSize: 12, opacity: 0.7 }}>UID: {h.employeeId} • {h.location}</div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <span style={{ fontWeight: 700, fontSize: '14px', color: '#fff' }}>{h.timestamp}</span>
+                                            <span className={`history-tag tag-${h.status.toLowerCase()}`}>{h.status}</span>
+                                        </div>
+                                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                                            <span style={{color: 'var(--primary)', fontWeight: 600}}>{h.employeeId}</span> • {h.location}
+                                        </div>
                                     </div>
                                 ))}
                             </div>
